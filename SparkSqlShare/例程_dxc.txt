@@ -1,0 +1,205 @@
+第一段程序：
+把eventLog读进来，将对应的event，转换成表，注册起来（具体有哪些event，参见源码org.apache.spark.scheduler.SparkListener.scala）
+第二段程序：
+从注册到的表里，查询集群中各个时段内的task总数,并用matplotlib绘制出来
+第三段程序：
+从注册到的表里，查询集群中所有机器各个时段内的task总数,并用matplotlib绘制出来
+*******************************************************************************************************************************************************
+def appendAppId(appId, item):
+  json_format = json.loads(item)//拿到每一行数据，这种应该先loads一下，转换成python对象再处理。
+  json_format['ApplicationID'] = appId//给每一行数据，加上appID
+  key = json_format['Event']//拿到具体的event
+  value = json.dumps(json_format).replace(' ', '')//放到容器里，都应该dumps下
+  return (key, value)//这里返回的是event和他对应的内容。
+
+def convertLine(filename, contents):
+  app_id = filename.split('/')[-1].split('.')[0]
+  one_lines = contents.split("\n")
+  list = []
+  for line in one_lines:
+    if line != '':
+      list.append((app_id, line))
+  return list
+
+def registerDBTable(table_name, table_set):
+  lineRdd = sc.parallelize(table_set)
+  sqlContext.jsonRDD(lineRdd).registerTempTable(table_name)
+  return
+
+fileResult = sc.wholeTextFiles("/gpfs/fs01/user/root/data/spark141batch/work/eventnew/3k/tenant-2015-11-16-23-21-08")
+etlResult = fileResult.repartition(20).flatMap(lambda item: convertLine(item[0], item[1])).map(lambda (appId, item): appendAppId(appId, item)).groupByKey().collect()
+//repartition(20) 就是RDD分成多少份，flatMap之后的结果是list（很多元祖，appid和对应的每一行内容。）
+for (table_name, table_set) in etlResult:
+  registerDBTable(table_name, table_set)//注册成表
+
+******************************************************************************************************************************************************
+
+%matplotlib inline
+from matplotlib.ticker import FuncFormatter
+from operator import add
+import matplotlib.pyplot as plt
+import numpy as np
+
+def autolabel(x, height, appNumber):
+    for i in x:
+        plt.text(x[i], height[i], '%d' % appNumber[i][1][0])
+
+def adjustHeight(height, defaultHeight):
+    if height > defaultHeight:
+        return defaultHeight
+    else:
+        return height
+    
+def getAppNumber(startTime, finishTime):
+    n = startTime 
+    list = []
+    while n <= finishTime:
+        list.append(n)
+        n = n + 1
+    return list
+
+def convertNone(i):
+    if (i[0] == None):
+        return (0, i[1])
+    else:
+        return i
+    
+def histChart(x, height, appNumber):    
+    plt.figure(figsize=(50,10))   
+    plt.xlabel('time')
+    plt.ylabel('the number of app')
+    plt.bar(x, height)
+    autolabel(x, height, appNumber)
+    plt.xticks(np.arange(len(appNumber)))
+    plt.show()
+
+def lineChart(x, height, appNumber):
+    lenght = len(appNumber)
+    plt.figure(figsize=(50,10))
+    plt.xlabel('time')
+    plt.ylabel('the number of app')
+    plt.plot(x, height)
+    autolabel(x, height, appNumber)
+    plt.xticks(np.arange(len(appNumber)))
+    plt.show() 
+    
+minStartTime =  sqlContext.sql("\
+SELECT min(ts.TaskInfo.LaunchTime) From \
+SparkListenerTaskStart ts \
+").collect()[0][0]
+
+maxFinishTime = sqlContext.sql("\
+SELECT max(te.TaskInfo.FinishTime) From \
+SparkListenerTaskEnd te \
+").collect()[0][0] 
+
+getInfo = sqlContext.sql(" \
+SELECT ts.TaskInfo.TaskID as taskId, ts.TaskInfo.ExecutorID as executorId, \
+ts.TaskInfo.Host as host, floor((ts.TaskInfo.LaunchTime - %s) / 1000) as startTime, \
+floor((te.TaskInfo.FinishTime - %s) / 1000) as finishTime FROM \
+SparkListenerTaskStart ts LEFT OUTER JOIN SparkListenerTaskEnd te ON \
+ts.TaskInfo.TaskID = te.TaskInfo.TaskID AND ts.TaskInfo.ExecutorID = \
+te.TaskInfo.ExecutorID AND ts.TaskInfo.Host = te.TaskInfo.Host \
+" % (minStartTime, minStartTime))
+getInfo.registerTempTable("taskInfo")
+
+list_length = int((maxFinishTime - minStartTime) / 1000) + 1
+_appNumber = sc.parallelize([i for i in range(list_length)]).map(lambda i: (i, 0))
+
+appNumber = getInfo.select("startTime", "finishTime").flatMap(lambda task: getAppNumber(task.startTime, task.finishTime)).map(lambda it: (it, 1)).reduceByKey(add).rightOuterJoin(_appNumber).map(lambda i: convertNone(i)).sortByKey().collect()
+
+for a in appNumber:
+    print(a)
+
+defaultHeight = 11000
+x = np.arange(len(appNumber))
+height = [adjustHeight(d[1][0], defaultHeight)for d in appNumber]
+
+histChart(x, height, appNumber)
+lineChart(x, height, appNumber)
+**************************************************************************************************************************************************************
+
+%matplotlib inline
+import matplotlib.pyplot as plt
+import numpy as np
+from time import *
+from random import *
+from operator import add
+from operator import concat
+
+def autolabel(x, height, appNumber):
+    for i in x:
+        plt.text(x[i], height[i], '%d' % appNumber[1][i])
+
+def adjustHeight(height, defaultHeight):
+    if height > defaultHeight:
+        return defaultHeight
+    else:
+        return height
+
+def getAppNumber(host, startTime, finishTime):
+    n = startTime 
+    list = []
+    while n <= finishTime:
+        list.append(n)
+        n = n + 1
+    return (host, list)
+
+def getTicks(length, minStartTime):
+    ticks = ['']*length
+    i = 0
+    while i < length:
+        ticks[i] = strftime("%m-%d %H:%M:%S", localtime(float((minStartTime + i * 1000)/1000)))
+        i = i + 8
+    return ticks
+
+def addBefore(x):
+    list = []
+    for i in x:
+        list.append((i, 1))
+    return list
+
+def addAfter(x, len):
+    list = sorted(x)
+    result = [0]*(len)
+    for i in list:
+        result[i[0]] = result[i[0]] + 1 
+    return result
+          
+minStartTime =  sqlContext.sql("\
+SELECT min(ts.TaskInfo.LaunchTime) From \
+SparkListenerTaskStart ts \
+").collect()[0][0]
+
+maxFinishTime = sqlContext.sql("\
+SELECT max(te.TaskInfo.FinishTime) From \
+SparkListenerTaskEnd te \
+").collect()[0][0] 
+
+getInfo = sqlContext.sql(" \
+SELECT ts.TaskInfo.TaskID as taskId, ts.TaskInfo.ExecutorID as executorId, \
+ts.TaskInfo.Host as host, floor((ts.TaskInfo.LaunchTime - %s) / 1000) as startTime, \
+floor((te.TaskInfo.FinishTime - %s) / 1000) as finishTime FROM \
+SparkListenerTaskStart ts LEFT OUTER JOIN SparkListenerTaskEnd te ON \
+ts.TaskInfo.TaskID = te.TaskInfo.TaskID AND ts.TaskInfo.ExecutorID = \
+te.TaskInfo.ExecutorID AND ts.TaskInfo.Host = te.TaskInfo.Host \
+" % (minStartTime, minStartTime))
+getInfo.registerTempTable("taskInfo")
+
+list_length = int((maxFinishTime - minStartTime) / 1000) + 1
+
+appNumber = getInfo.select("startTime", "finishTime", "host").map(lambda task: getAppNumber(task.host, task.startTime, task.finishTime)).reduceByKey(concat).mapValues(addBefore).mapValues(lambda x: addAfter(x, list_length)).collect()
+
+plt.figure(figsize=(50,10))
+plt.xlabel('time')
+plt.ylabel('the number of app')
+for a in appNumber:
+    defaultHeight = 11000
+    x = np.arange(list_length)
+    height = [adjustHeight(h, defaultHeight)for h in a[1]]
+    plt.plot(x, height, color=(random(), random(), random()), label=a[0], linewidth=3)
+#     autolabel(x, height, a)
+xtick = getTicks(list_length, minStartTime)
+plt.xticks(np.arange(len(xtick)),xtick) 
+plt.legend()
+plt.show() 

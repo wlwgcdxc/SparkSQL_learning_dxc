@@ -1,0 +1,396 @@
+
+result[0][0].split('/')[-1].split('.')[0]
+result[0][1].split("\n")[1]
+result[0][1].split("\n")[2]
+result[0][1].split("\n")[3]
+result[0][1].split("\n")[4]
+result[0][1].split("\n")[5]
+result[0][1].split("\n")[6]
+json_format = json.loads(result[0][1].split("\n")[1])//将json格式（对象形式{"xxx" : XXX} => dict和数组形式[xxx,xxx,xxx] => list）的转换成python对象
+json_format['ApplicationID'] = result[0][0].split('/')[-1]//可以dict[xx]=xx，直接给dict里新加数据
+dicts['SparkListenerBlockManagerAdded'].add(json.dumps(json_format)
+
+import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
+val dicts = new HashMap[String,HashSet[String]]
+dicts.getOrElseUpdate("SparkListenerStageSubmitted", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerStageCompleted", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerTaskStart", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerTaskGettingResult", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerTaskEnd", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerJobStart", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerJobEnd", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerEnvironmentUpdate", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerBlockManagerAdded", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerBlockManagerRemoved", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerUnpersistRDD", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerExecutorAdded", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerExecutorRemoved", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerExecutorMetricsUpdate", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerApplicationStart", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerApplicationEnd", new HashSet[String])
+dicts.getOrElseUpdate("SparkListenerLogStart", new HashSet[String])
+var result = sc.wholeTextFiles("/opt/xcdong/data/spark-history").collect()
+
+1.
+import json
+dicts = {}
+dicts['SparkListenerStageSubmitted'] = set()
+dicts['SparkListenerStageCompleted'] = set()
+dicts['SparkListenerTaskStart'] = set()
+dicts['SparkListenerTaskGettingResult'] = set()
+dicts['SparkListenerTaskEnd'] = set()
+dicts['SparkListenerJobStart'] = set()
+dicts['SparkListenerJobEnd'] = set()
+dicts['SparkListenerEnvironmentUpdate'] = set()
+dicts['SparkListenerBlockManagerAdded'] = set()
+dicts['SparkListenerBlockManagerRemoved'] = set()
+dicts['SparkListenerUnpersistRDD'] = set()
+dicts['SparkListenerExecutorAdded'] = set()
+dicts['SparkListenerExecutorRemoved'] = set()
+
+dicts['SparkListenerExecutorMetricsUpdate'] = set()
+dicts['SparkListenerApplicationStart'] = set()
+dicts['SparkListenerApplicationEnd'] = set()
+dicts['SparkListenerLogStart'] = set()
+
+result = sc.wholeTextFiles("/gpfs/fs01/user/root/data/spark141batch/work/spark-history").collect()
+for(filename, contents) in result:
+  app_id = filename.split('/')[-1].split('.')[0]
+  one_lines = contents.split("\n")
+  for line in one_lines:
+    if line != '':
+      json_format = json.loads(line)
+      json_format['ApplicationID'] = app_id
+      for table_name in dicts.keys():        
+        if json_format['Event'] == table_name:
+          dicts[table_name].add(json.dumps(json_format).replace(' ', ''))
+          break
+
+for key in dicts.keys():
+    print(key)
+    print(len(dicts[key]))
+
+
+for(table_name, table_set) in dicts.items():
+  lineRdd = sc.parallelize(table_set)
+  sqlContext.jsonRDD(lineRdd).registerAsTable(table_name)
+
+taskStart = sqlContext.sql(" \
+SELECT ts.TaskInfo.TaskID as taskId, ts.TaskInfo.Host as host FROM \
+SparkListenerTaskStart ts \
+")
+
+taskEnd = sqlContext.sql(" \
+SELECT ts.TaskInfo.TaskID FROM \
+SparkListenerTaskStart ts \
+")
+
+# taskStart.filter(lambda task: taskEnd.select(task.taskId).count() == 0).groupBy("host").count().show()
+
+1.
+
+import json
+
+def appendAppId(appId, item):
+  json_format = json.loads(item)
+  json_format['ApplicationID'] = appId
+  key = json_format['Event']
+  value = json.dumps(json_format).replace(' ', '')
+  return (key, value)
+
+def convertLine(filename, contents):
+  app_id = filename.split('/')[-1].split('.')[0]
+  one_lines = contents.split("\n")
+  list = []
+  for line in one_lines:
+    if line != '':
+      list.append((app_id, line))
+  return list
+
+def registerDBTable(table_name, table_set):
+  lineRdd = sc.parallelize(table_set)
+  sqlContext.jsonRDD(lineRdd).registerTempTable(table_name)
+  return
+
+fileResult = sc.wholeTextFiles("/gpfs/fs01/user/root/data/spark141batch/work/eventnew/3k/tenant-2015-11-16-23-21-08")
+etlResult = fileResult.repartition(20).flatMap(lambda item: convertLine(item[0], item[1])).map(lambda (appId, item): appendAppId(appId, item)).groupByKey().collect()
+
+for (table_name, table_set) in etlResult:
+  registerDBTable(table_name, table_set)
+
+
+
+2.
+getInfo = sqlContext.sql("\
+SELECT count(*) as number, floor(TaskMetrics.ExecutorRunTime/1000) as segment FROM SparkListenerTaskEnd \
+Where TaskEndReason.Reason = 'Success' \
+Group by floor(TaskMetrics.ExecutorRunTime/1000) \
+Order by segment \
+")
+for each in getInfo.collect():
+    print(each)
+
+3.
+%matplotlib inline
+from matplotlib.ticker import FuncFormatter
+import matplotlib.pyplot as plt
+import numpy as np
+
+x = np.arange(4)
+money = [1.5e5, 2.5e6, 5.5e6, 2.0e7]
+
+
+def millions(x, pos):
+    'The two args are the value and tick position'
+    return '$%1.1fM' % (x*1e-6)
+
+formatter = FuncFormatter(millions)
+
+fig, ax = plt.subplots()
+ax.yaxis.set_major_formatter(formatter)
+plt.bar(x, money)
+plt.xticks(x + 0.5, ('Bild', 'Fred', 'Mary', 'Sue'))
+plt.show()
+
+4.
+
+
+getInfo = sqlContext.sql(" \
+SELECT ss.ApplicationID FROM \
+SparkListenerJobStart ss\
+")
+
+
+getInfo = sqlContext.sql("\
+SELECT ss.ApplicationID, ss.JobID, floor((se.CompletionTime - ss.SubmissionTime)/1000) as duration, floor((ss.SubmissionTime - 1447134320602)/1000) as submit FROM SparkListenerJobStart ss, SparkListenerJobEnd se \
+Where ss.ApplicationID = se.ApplicationID And ss.JobID = se.JobID \
+Order by submit, duration \
+")
+for each in getInfo.collect():
+    print(each)
+
+5.
+%matplotlib inline
+import numpy as np
+import matplotlib.pyplot as plt
+
+n = 12
+X = np.arange(n)
+Y1 = (1-X/float(n)) * np.random.uniform(0.5,1.0,n)
+Y2 = (1-X/float(n)) * np.random.uniform(0.5,1.0,n)
+
+plt.axes([0.025,0.025,0.95,0.95])
+plt.bar(X, +Y1, facecolor='#9999ff', edgecolor='white')
+plt.bar(X, -Y2, facecolor='#ff9999', edgecolor='white')
+
+for x,y in zip(X,Y1):
+    plt.text(x+0.4, y+0.05, '%.2f' % y, ha='center', va= 'bottom')
+
+for x,y in zip(X,Y2):
+    plt.text(x+0.4, -y-0.05, '%.2f' % y, ha='center', va= 'top')
+
+plt.xlim(-.5,n), plt.xticks([])
+plt.ylim(-1.25,+1.25), plt.yticks([])
+
+# savefig('../figures/bar_ex.png', dpi=48)
+plt.show()
+
+6.
+getInfo = sqlContext.sql("SELECT ApplicationID, TaskInfo.TaskID, TaskMetrics.ExecutorRunTime,StageId FROM SparkListenerTaskEnd")
+
+for each in getInfo.collect():
+    print(each)
+
+7.
+getInfo = sqlContext.sql("\
+SELECT min(ss.SubmissionTime), max(ss.SubmissionTime) FROM SparkListenerJobStart as ss \
+")
+for each in getInfo.collect():
+    print('---', each)
+    
+minSubmissionTime = getInfo.collect()[0][0]
+getInfo = sqlContext.sql("\
+SELECT ss.ApplicationID, ss.JobID, floor((se.CompletionTime - ss.SubmissionTime)/1000) as duration, floor((ss.SubmissionTime - %d)/1000) as submit FROM SparkListenerJobStart ss, SparkListenerJobEnd se \
+Where ss.ApplicationID = se.ApplicationID And ss.JobID = se.JobID \
+Order by submit, duration \
+" % minSubmissionTime)  
+
+8.
+import matplotlib.pyplot as plt
+
+def plot(delays):
+    """
+    Show a bar chart of the total delay per airline
+    """
+    duration = [d[2] for d in delays]
+    submit  = [d[3] for d in delays]
+    plt.scatter(submit, duration)
+    plt.show()
+
+%matplotlib inline
+plot(getInfo.collect())
+
+9.
+%matplotlib inline
+from matplotlib.ticker import FuncFormatter
+import matplotlib.pyplot as plt
+import numpy as np
+
+getInfo = sqlContext.sql("\
+SELECT count(*) as number, ceil(TaskMetrics.ExecutorRunTime/50) as segment FROM SparkListenerTaskEnd \
+Group by ceil(TaskMetrics.ExecutorRunTime/50) \
+Order by segment \
+")
+for each in getInfo.collect():
+    print(each)
+    
+x = np.arange(4)
+def testplot(delays):
+    """
+    Show a bar chart of the total delay per airline
+    """
+    airlines = [d[1] for d in delays]
+    minutes  = [d[0] for d in delays]
+
+    plt.plot(airlines, minutes)
+    plt.show()
+
+testplot(getInfo.collect())
+
+10
+import numpy as np
+import matplotlib.mlab as mlab
+import matplotlib.pyplot as plt
+
+
+# example data
+mu = 100  # mean of distribution
+sigma = 15  # standard deviation of distribution
+x = mu + sigma * np.random.randn(10000)
+
+num_bins = 50
+# the histogram of the data
+n, bins, patches = plt.hist(x, num_bins, normed=1, facecolor='green', alpha=0.5)
+# add a 'best fit' line
+y = mlab.normpdf(bins, mu, sigma)
+plt.plot(bins, y, 'r--')
+plt.xlabel('Smarts')
+plt.ylabel('Probability')
+plt.title(r'Histogram of IQ: $\mu=100$, $\sigma=15$')
+
+# Tweak spacing to prevent clipping of ylabel
+plt.subplots_adjust(left=0.15)
+plt.show()
+
+11
+
+%matplotlib inline
+from matplotlib.ticker import FuncFormatter
+import matplotlib.pyplot as plt
+import numpy as np
+
+def autolabel(rects, appNumber):
+    number = 0
+    for rect in rects:
+        height = rect.get_height()
+        x = rect.get_x()
+        plt.text(x, height, '%d' % appNumber[number])
+        number = number + 1
+
+def adjustHeight(height):
+    if height < 1000:
+        return 8 * height + 800
+    else:
+        return height
+
+def needsAdjustHei(datas):
+    min = 9999999999999
+    max = -1
+    for data in datas:
+        if data < min:
+            min = data
+        if data > max:
+            max = data
+    if ((max - min) > 15000):
+        return True
+    else:
+        return False
+        
+    
+# getInfo = sqlContext.sql("\
+# SELECT count(*) as number, floor(TaskMetrics.ExecutorRunTime/1000) as segment FROM SparkListenerTaskEnd \
+# Where TaskEndReason.Reason = 'Success' \
+# Group by floor(TaskMetrics.ExecutorRunTime/1000) \
+# Order by segment \
+# ")
+
+getInfo = sqlContext.sql("\
+SELECT count(*) as number, floor((se.CompletionTime - ss.SubmissionTime)/5000) as duration FROM SparkListenerJobStart ss, SparkListenerJobEnd se \
+WHERE ss.ApplicationID = se.ApplicationID AND ss.JobID = se.JobID AND se.JobResult.Result = 'JobSucceeded' \
+GROUP BY floor((se.CompletionTime - ss.SubmissionTime)/5000) \
+ORDER by duration \
+")
+
+for each in getInfo.collect():
+    print(each)
+    
+data = getInfo.collect()
+appNumber = [d[0] for d in data]
+x = [d[1] for d in data]
+if (needsAdjustHei(appNumber)):
+    height = [adjustHeight(d[0])for d in data]
+else:
+    height = [d[0] for d in data]
+    
+
+
+plt.xlabel('time')
+plt.ylabel('the number of app')
+rects = plt.bar(x, height)
+autolabel(rects, appNumber)
+
+plt.xticks(np.arange(9))
+plt.show()
+
+
+12
+
+%matplotlib inline
+from matplotlib.ticker import FuncFormatter
+import matplotlib.pyplot as plt
+import numpy as np
+
+def autolabel(rects, appNumber):
+    number = 0
+    for rect in rects:
+        height = rect.get_height()
+        x = rect.get_x()
+        plt.text(x, height + 395, '%d' % appNumber[number])
+        number = number + 1
+
+def adjustHeight(height):
+    if height < 1000:
+        return 8 * height + 800
+    else:
+        return height
+
+getInfo = sqlContext.sql("\
+SELECT count(*) as number, floor(TaskMetrics.ExecutorRunTime/1000) as segment FROM SparkListenerTaskEnd \
+Where TaskEndReason.Reason = 'Success' \
+Group by floor(TaskMetrics.ExecutorRunTime/1000) \
+Order by segment \
+")
+
+data = getInfo.collect()
+appNumber = [d[0] for d in data]
+height = [adjustHeight(d[0]) for d in data]
+x = [d[1] for d in data]
+
+plt.xlabel('time')
+plt.ylabel('the number of app')
+rects = plt.bar(x, height)
+autolabel(rects, appNumber)
+
+plt.show() 
+
+
